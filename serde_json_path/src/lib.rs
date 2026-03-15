@@ -335,7 +335,7 @@
     clippy::if_let_mutex,
     unexpected_cfgs,
     clippy::await_holding_lock,
-    clippy::match_on_vec_items,
+    clippy::indexing_slicing,
     clippy::imprecise_flops,
     clippy::suboptimal_flops,
     clippy::lossy_float_literal,
