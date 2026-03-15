@@ -1,5 +1,5 @@
 use nom::bytes::complete::tag;
-use nom::character::complete::char;
+use nom::character::complete::{alphanumeric1, anychar, char, none_of};
 use nom::error::context;
 use nom::sequence::terminated;
 use nom::{
@@ -12,6 +12,8 @@ use nom::{
 };
 use serde_json_path_core::spec::segment::{QuerySegment, QuerySegmentKind, Segment};
 use serde_json_path_core::spec::selector::Selector;
+
+use crate::parser::primitive::string::{parse_string_literal}  ;
 
 use super::selector::{parse_selector, parse_wildcard_selector};
 use super::utils::cut_with;
@@ -42,19 +44,27 @@ fn parse_name_char(input: &str) -> PResult<&str> {
 }
 
 #[cfg_attr(feature = "trace", tracing::instrument(level = "trace", parent = None, ret, err))]
+fn parse_quoted_name_char(input: &str) -> PResult<&str> {
+    recognize(none_of("'\""))(input)
+}
+
+#[cfg_attr(feature = "trace", tracing::instrument(level = "trace", parent = None, ret, err))]
 pub(crate) fn parse_dot_member_name(input: &str) -> PResult<String> {
-    map(
-        recognize(pair(
-            cut_with(parse_name_first, |_| {
-                SegmentError::InvalidFirstNameCharacter
-            }),
-            fold_many0(parse_name_char, String::new, |mut s, item| {
-                s.push_str(item);
-                s
-            }),
-        )),
-        |s| s.to_owned(),
-    )(input)
+    alt((
+        map(parse_string_literal, |s| s.to_owned()),
+        map(
+            recognize(pair(
+                cut_with(parse_name_first, |_| {
+                    SegmentError::InvalidFirstNameCharacter
+                }),
+                fold_many0(parse_name_char, String::new, |mut s, item| {
+                    s.push_str(item);
+                    s
+                }),
+            )),
+            |s| s.to_owned(),
+        ),
+    ))(input)
 }
 
 #[cfg_attr(feature = "trace", tracing::instrument(level = "trace", parent = None, ret, err))]
@@ -167,6 +177,26 @@ mod tests {
             Ok(("", Segment::DotName(s))) if s == "name",
         ));
         assert!(matches!(
+            parse_dot_member_name_shorthand(".'name'"),
+            Ok(("", Segment::DotName(s))) if s == "name",
+        ));
+        assert!(matches!(
+            parse_dot_member_name_shorthand(".\"name\""),
+            Ok(("", Segment::DotName(s))) if s == "name",
+        ));
+        assert!(matches!(
+            parse_dot_member_name_shorthand_inside_escaped(".\"na\"me\""),
+            Ok(("", Segment::DotName(s))) if s == "na\"me",
+        ));
+        assert!(matches!(
+            parse_dot_member_name_shorthand(".'quote-name-with:symbols'"),
+            Ok(("", Segment::DotName(s))) if s == "quote-name-with:symbols",
+        ));
+        assert!(matches!(
+            parse_dot_member_name_shorthand(".\"quote-name-with:symbols\""),
+            Ok(("", Segment::DotName(s))) if s == "quote-name-with:symbols",
+        ));
+        assert!(matches!(
             parse_dot_member_name_shorthand(".foo_bar"),
             Ok(("", Segment::DotName(s))) if s == "foo_bar",
         ));
@@ -226,6 +256,14 @@ mod tests {
         {
             let (_, sk) = parse_child_segment(".name").unwrap();
             assert_eq!(sk.as_dot_name(), Some("name"));
+        }
+        {
+            let (_, sk) = parse_child_segment(".'name'").unwrap();
+            assert_eq!(sk.as_dot_name(), Some("name"));
+        }
+        {
+            let (_, sk) = parse_child_segment(".'quote-name-with:symbols'").unwrap();
+            assert_eq!(sk.as_dot_name(), Some("quote-name-with:symbols"));
         }
         {
             let (_, sk) = parse_child_segment(".*").unwrap();
